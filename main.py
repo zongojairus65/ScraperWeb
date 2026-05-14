@@ -32,11 +32,16 @@ def run_scraper(url: str, prompt: str) -> dict:
     """
     Exécute le scraper dans un thread séparé pour éviter
     le conflit avec la boucle asyncio de FastAPI.
+    Utilise 'requests' au lieu de Playwright (pas de navigateur nécessaire).
     """
     groq_key = os.getenv("GROQ_API_KEY")
 
     if not groq_key:
         raise ValueError("Clé API Groq manquante. Configurez GROQ_API_KEY dans les variables d'environnement.")
+
+    # Ajouter https:// si absent
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
 
     graph_config = {
         "llm": {
@@ -44,7 +49,8 @@ def run_scraper(url: str, prompt: str) -> dict:
             "model": "groq/llama-3.3-70b-versatile",
         },
         "verbose": False,
-        "headless": True,
+        # Utilise requests HTTP simple — pas besoin de Playwright ni Chromium
+        "scraper_type": "fetch",
     }
 
     smart_scraper_graph = SmartScraperGraph(
@@ -82,11 +88,9 @@ async def scrape(
     """
     Scrape une page web avec l'IA
 
-    Exemple: /scrape?url=https://example.com&prompt=Donne-moi le titre
+    Exemple: /scrape?url=https://fr.wikipedia.org/wiki/Koudougou&prompt=Que signifie Koudougou
     """
     try:
-        # Exécuter le scraper dans un thread séparé pour éviter
-        # le conflit asyncio.run() / boucle d'événements FastAPI
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(executor, run_scraper, url, prompt)
 
@@ -104,4 +108,4 @@ async def scrape(
         raise HTTPException(
             status_code=500,
             detail=f"Erreur lors du scraping: {str(e)}"
-    )
+)
