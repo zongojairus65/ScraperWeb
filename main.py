@@ -1,4 +1,6 @@
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from scrapegraphai.graphs import SmartScraperGraph
@@ -13,7 +15,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configurer CORS pour autoriser toutes les origines (à ajuster en production)
+# Configurer CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,7 +24,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Route de base pour vérifier que l'API fonctionne
+# Executor pour exécuter le scraper dans un thread séparé
+executor = ThreadPoolExecutor(max_workers=3)
+
+
+def run_scraper(url: str, prompt: str) -> dict:
+    """
+    Exécute le scraper dans un thread séparé pour éviter
+    le conflit avec la boucle asyncio de FastAPI.
+    """
+    groq_key = os.getenv("GROQ_API_KEY")
+
+    if not groq_key:
+        raise ValueError("Clé API Groq manquante. Configurez GROQ_API_KEY dans les variables d'environnement.")
+
+    graph_config = {
+        "llm": {
+            "api_key": groq_key,
+            "model": "groq/llama3-8b-8192",
+        },
+        "verbose": False,
+        "headless": True,
+    }
+
+    smart_scraper_graph = SmartScraperGraph(
+        prompt=prompt,
+        source=url,
+        config=graph_config
+    )
+
+    return smart_scraper_graph.run()
+
+
+# Route de base
 @app.get("/")
 async def root():
     return {
@@ -47,58 +81,27 @@ async def scrape(
 ):
     """
     Scrape une page web avec l'IA
-    
+
     Exemple: /scrape?url=https://example.com&prompt=Donne-moi le titre
     """
-    # Récupération de la clé API
-    groq_key = os.getenv("GROQ_API_KEY")
-    
-    if not groq_key:
-        raise HTTPException(
-            status_code=500, 
-            detail="Clé API Groq manquante. Configurez GROQ_API_KEY dans les variables d'environnement."
-        )
-
-    # Configuration du modèle
-    graph_config = {
-        "llm": {
-            "api_key": groq_key,
-            "model": "groq/llama3-8b-8192",
-        },
-        "verbose": False,
-        "headless": True,  # Important pour Render (pas de navigateur)
-    }
-
     try:
-        # Initialisation et exécution
-        smart_scraper_graph = SmartScraperGraph(
-            prompt=prompt,
-            source=url,
-            config=graph_config
-        )
-        
-        result = smart_scraper_graph.run()
-        
+        # Exécuter le scraper dans un thread séparé pour éviter
+        # le conflit asyncio.run() / boucle d'événements FastAPI
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, run_scraper, url, prompt)
+
         return {
             "status": "success",
             "url": url,
             "prompt": prompt,
             "data": result
         }
-    
+
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Erreur lors du scraping: {str(e)}"
-        )
-
-# Route spécifique pour les citations (exemple)
-@app.get("/citations")
-async def get_citations():
-    """
-    Exemple de route spécifique pour scraper des citations
-    """
-    return await scrape(
-        url="https://example.com/citations",  # À remplacer par votre URL
-        prompt="Liste toutes les citations avec leurs auteurs"
     )
