@@ -41,7 +41,7 @@ def run_scraper(url: str, prompt: str) -> dict:
     graph_config = {
         "llm": {
             "api_key": groq_key,
-            "model": "groq/llama3-8b-8192",
+            "model": "groq/mixtral-8x7b-32768",
         },
         "verbose": False,
         "headless": True,
@@ -104,4 +104,4 @@ async def scrape(
         raise HTTPException(
             status_code=500,
             detail=f"Erreur lors du scraping: {str(e)}"
-    )
+        )
